@@ -28,9 +28,6 @@ RUN yum install -y curl \
         python \
         python-devel \
         sqlite3 \
-        texlive-fonts-recommended \
-        texlive-latex-base \
-        texlive-latex-extra \
         zlib1g-devel
 
 # Install the recent pip release

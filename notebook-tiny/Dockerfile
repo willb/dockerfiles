@@ -1,0 +1,78 @@
+# (ideally) minimal pyspark/jupyter notebook
+
+FROM centos:centos7
+
+RUN yum install -y java git emacs zsh curl bzip2
+
+## taken/adapted from jupyter dockerfiles
+
+# Not essential, but wise to set the lang
+# Note: Users with other languages should set this in their derivative image
+ENV LANGUAGE en_US.UTF-8
+ENV LANG en_US.UTF-8
+ENV LC_ALL en_US.UTF-8
+ENV PYTHONIOENCODING UTF-8
+ENV CONDA_DIR /opt/conda
+
+# Python binary and source dependencies
+RUN yum install -y curl wget \
+    	gnupg2 \
+        git \
+        sqlite3 && yum install -y epel-release && yum install -y jq
+
+RUN cd /tmp && wget -q https://repo.continuum.io/miniconda/Miniconda2-4.0.5-Linux-x86_64.sh && echo 42dac45eee5e58f05f37399adda45e85 Miniconda2-4.0.5-Linux-x86_64.sh | md5sum -c - && bash Miniconda2-4.0.5-Linux-x86_64.sh -b -p $CONDA_DIR && rm Miniconda2-4.0.5-Linux-x86_64.sh
+
+ENV PATH /opt/conda/bin:$PATH
+
+# Move notebook contents into place.
+# ADD . /usr/src/jupyter-notebook
+
+RUN yum install -y gcc gcc-c++ glibc-devel && conda create --quiet --yes -p $CONDA_DIR/envs/python2 ipywidgets pandas numexpr matplotlib scipy seaborn scikit-learn notebook jupyter && source activate /opt/conda/envs/python2 && pip install widgetsnbextension && yum erase -y gcc gcc-c++ glibc-devel &&     rm -rf /root/.npm && \
+    rm -rf /root/.cache && \
+    rm -rf /root/.config && \
+    rm -rf /root/.local && \
+    rm -rf /root/tmp && conda clean -tipsy
+
+ENV APACHE_SPARK_VERSION 1.6.1
+RUN cd /tmp && \
+        wget -q http://d3kbcqa49mib13.cloudfront.net/spark-${APACHE_SPARK_VERSION}-bin-hadoop2.6.tgz && \
+        echo "09f3b50676abc9b3d1895773d18976953ee76945afa72fa57e6473ce4e215970 *spark-${APACHE_SPARK_VERSION}-bin-hadoop2.6.tgz" | sha256sum -c - && \
+        tar xzf spark-${APACHE_SPARK_VERSION}-bin-hadoop2.6.tgz -C /usr/local && \
+        rm spark-${APACHE_SPARK_VERSION}-bin-hadoop2.6.tgz
+RUN cd /usr/local && ln -s spark-${APACHE_SPARK_VERSION}-bin-hadoop2.6 spark
+
+ENV SPARK_HOME /usr/local/spark
+ENV PYTHONPATH $SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-0.9-src.zip
+ENV SPARK_OPTS --driver-java-options=-Xms1024M --driver-java-options=-Xmx4096M --driver-java-options=-Dlog4j.logLevel=info
+
+# Add a notebook profile.
+RUN mkdir -p -m 700 /root/.jupyter/ && \
+    echo "c.NotebookApp.ip = '*'" >> /root/.jupyter/jupyter_notebook_config.py && \
+    echo "c.NotebookApp.open_browser = False" >> /root/.jupyter/jupyter_notebook_config.py
+
+VOLUME /notebooks
+WORKDIR /notebooks
+
+# tini setup
+
+ENV TINI_VERSION v0.9.0
+ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
+ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini.asc /tini.asc
+RUN gpg --keyserver ha.pool.sks-keyservers.net --recv-keys 0527A9B7 && gpg --verify /tini.asc
+RUN chmod +x /tini
+
+ENTRYPOINT ["/tini", "--"]
+
+EXPOSE 8888
+
+ADD start.sh /start.sh
+ADD msgs.parquet /msgs.parquet
+ADD pyspark.ipynb /notebooks/pyspark.ipynb
+
+
+# RUN jq --arg v "$CONDA_DIR/envs/python2/bin/python" \
+#        '.["env"]["PYSPARK_PYTHON"]=$v' \
+#        $CONDA_DIR/share/jupyter/kernels/python2/kernel.json > /tmp/kernel.json && \
+#        mv /tmp/kernel.json $CONDA_DIR/share/jupyter/kernels/python2/kernel.json
+
+CMD ["/start.sh"]
